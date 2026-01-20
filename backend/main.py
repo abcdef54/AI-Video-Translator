@@ -1,18 +1,49 @@
 import os
 import asyncio
+import gc
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from backend.utils import download_audio, load_audio_to_numpy
 from faster_whisper import WhisperModel
 import json
 import uuid
-from  typing import Dict
 import numpy as np
+import torch
+from   utils import  download_audio, load_audio_to_numpy
+
+GLOBAL_MODEL = None
+CURRENT_MODEL_SIZE = "medium"
+LOCAL_MODEL_DIR = "./models"
+
+if torch.cuda.is_available():
+    device = "cuda"
+    compute_type = "float16"
+else:
+    device = "cpu"
+    compute_type = "int8"
 
 app = FastAPI()
 
-print("Loading Model...")
-model = WhisperModel("small", device="cuda", compute_type="float16")
-print("Model Loaded!")
+
+
+def load_model(size_name):
+    global GLOBAL_MODEL, CURRENT_MODEL_SIZE
+    if GLOBAL_MODEL is not None:
+        del GLOBAL_MODEL
+        gc.collect()
+        if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+    print(f"Loading {size_name}...")
+    try:
+        model_path = f"{LOCAL_MODEL_DIR}/{size_name}"
+        if os.path.exists(model_path):
+            GLOBAL_MODEL = WhisperModel(model_path, device=device, compute_type=compute_type)
+        else:
+            GLOBAL_MODEL = WhisperModel(size_name, device=device, compute_type=compute_type)
+        CURRENT_MODEL_SIZE = size_name
+        return True
+    except Exception:
+        return False
+
+load_model("medium") 
 
 @app.websocket("/ws/translate")
 async def websocket_endpoint(websocket: WebSocket):
@@ -22,142 +53,103 @@ async def websocket_endpoint(websocket: WebSocket):
     audio_array = None
     transcription_task = None
     
-    stream_state = {
-        "last_processed_time": 0.0, # The exact second where the model stopped speaking
-        "rolling_transcript": "",   # The last few sentences generated
-        "static_context": ""        # The user-defined context ("Video about coding")
-    }
+    stream_state = { "last_processed_time": 0.0, "rolling_transcript": "", "static_context": "" }
 
     try:
         while True:
             data = await websocket.receive_text()
-            command: Dict[str, str] = json.loads(data)
-
+            command = json.loads(data)
             action = command.get("action")
 
             if action == "load_video":
-                # Cancel any running transcription
-                if transcription_task:
-                    transcription_task.cancel()
-
-                # Reset context
-                stream_state["last_processed_time"] = 0.0
-                stream_state["rolling_transcript"] = ""
+                if transcription_task: transcription_task.cancel()
                 
                 url = command.get("url")
-                await  websocket.send_json({"status" : "Downloading Audio"})
+                await websocket.send_json({"status" : "Downloading Audio..."})
                 audio_file = await asyncio.to_thread(download_audio, url, session_id)
                 audio_array = await asyncio.to_thread(load_audio_to_numpy, audio_file)
-
-                await websocket.send_json({"status" : "Ready to play"})
-
-            elif action == "transcribe": # First time playing video or switching languages or skipping part of the video
-                # Kill previous transcription (e.g. was playing in Chinese, now switching)
-                if transcription_task:
-                    transcription_task.cancel()
-                    try:
-                        await transcription_task
-                    except Exception as e:
-                        pass
                 
-                current_seek_time = float(command.get("timestamp", 0.0))
+                duration = len(audio_array) / 16000.0 if audio_array is not None else 0
+                await websocket.send_json({"status" : "Ready to play", "duration": duration})
+
+                # START the stream  immeadately
+                start_time = float(command.get("timestamp", 0.0))
                 language = command.get("language", "zh")
-
-                # Update Static Context if provided (Persist it)
-                if command.get("context"):
-                    stream_state["static_context"] = command.get("context")
-
-                # soft skip detection
-                time_diff = abs(current_seek_time - stream_state["last_processed_time"])
-
-                final_prompt = ""
-                if time_diff <= 5.0 and stream_state["rolling_transcript"]:
-                    final_prompt = (
-                        stream_state["static_context"] + "\n\n" +
-                        stream_state["rolling_transcript"]
-                    )
-                elif time_diff > 5:
-                    final_prompt = stream_state["static_context"] + "\n"
+                if command.get("context"): stream_state["static_context"] = command.get("context")
 
                 transcription_task = asyncio.create_task(
-                    run_transcription(
-                        websocket,
-                        model,
-                        audio_array,
-                        current_seek_time,
-                        language,
-                        final_prompt,
-                        stream_state
-                    )
+                    run_transcription(websocket, GLOBAL_MODEL, audio_array, start_time, language, stream_state["static_context"])
+                )
+
+            elif action == "change_model":
+                new_size = command.get("model_size")
+                if new_size != CURRENT_MODEL_SIZE:
+                    if transcription_task: transcription_task.cancel()
+                    await websocket.send_json({"status" : f"Switching to {new_size}..."})
+                    await asyncio.to_thread(load_model, new_size)
+                    await websocket.send_json({"status" : f"Model Ready ({new_size})"})
+
+            elif action == "translate": 
+                if transcription_task: 
+                    transcription_task.cancel()
+                    try: await transcription_task 
+                    except: pass
+
+                start_time = float(command.get("timestamp", 0.0))
+                language = command.get("language", "zh")
+                if command.get("context"): stream_state["static_context"] = command.get("context")
+
+                transcription_task = asyncio.create_task(
+                    run_transcription(websocket, GLOBAL_MODEL, audio_array, start_time, language, stream_state["static_context"])
                 )
 
     except WebSocketDisconnect:
         print("Client disconnected")
-    except Exception as e:
-        print(f"Error: {e}")
-        await websocket.send_text(f"ERROR: {str(e)}")
     finally:
-        # Cleanup unique file
         if transcription_task: transcription_task.cancel()
-        if audio_file and os.path.exists(audio_file):
-            os.remove(audio_file)
+        if audio_file and os.path.exists(audio_file): os.remove(audio_file)
 
-async def run_transcription(websocket: WebSocket, 
-                            model: WhisperModel, 
-                            audio_array: np.ndarray, 
-                            start_time: float, 
-                            language: str, 
-                            context: str|None,
-                            state: Dict ):
+async def run_transcription(websocket: WebSocket, model: WhisperModel, audio_array: np.ndarray, start_time: float, language: str, context: str):
     try:
-        # Sample rate is 16000. Index = Seconds * 16000
         start_sample = int(start_time * 16000)
-        if start_sample > len(audio_array):
-            await websocket.send_json({"status" : "End of video"})
+        if audio_array is None or start_sample >= len(audio_array):
             return
         
         audio_slice = audio_array[start_sample:]
 
         def get_segments():
-            segments, info = model.transcribe(
+            segments, _ = model.transcribe(
                 audio_slice,
                 task="translate",
                 language=language,
                 beam_size=5,
-                initial_prompt=context
+                initial_prompt=context,
+                condition_on_previous_text=True 
             )
             return segments
         
-        # Run generator in thread (so we don't block the main loop)
         segment_generator = await asyncio.to_thread(get_segments)
 
         for segment in segment_generator:
+            # Check if client closed connection, stop processing
+            if websocket.client_state.name != "CONNECTED": break
+
             real_start = segment.start + start_time
             real_end = segment.end + start_time
-            text = segment.text
-
-            # We track exactly where the model is currently looking
-            state["last_processed_time"] = real_end
             
-            # Append to rolling transcript (keep it limited to ~200 chars to avoid Prompt bloat)
-            state["rolling_transcript"] += " " + text
-            if len(state["rolling_transcript"]) > 200:
-                state["rolling_transcript"] = state["rolling_transcript"][-200:]
-        
-            pay_load = {
+            payload = {
                 "type" : "subtitle",
                 "start" : real_start,
                 "end" : real_end,
-                "text" : text
+                "text" : segment.text
             }
+            await websocket.send_json(payload)
+            await asyncio.sleep(0.01)
 
-            await websocket.send_json(pay_load)
-            await asyncio.sleep(0.01)  # Yield to event loop
     except asyncio.CancelledError:
-        print("Transcription stopped (Language change or seek).")
+        pass 
     except Exception as e:
-        print(f"Error: {e}")
-
+        print(f"Transcribe Error: {e}")
 
 if __name__ == "__main__":
     import uvicorn

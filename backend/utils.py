@@ -1,15 +1,18 @@
 import yt_dlp
 import ffmpeg
 import numpy as np
+import os
 
-async def download_audio(url: list[str], session_id: str, allow_playlist: bool = False):
-    assert isinstance(url, list)
-    filename = f"temp_{session_id}.m4a"
+def download_audio(url: str, session_id: str, allow_playlist: bool = False):
+    print(f"Downloading Audio: {url}")
+    base_filename = f"temp_{session_id}"
+    
     ydl_ops = {
-        'format' : 'bestaudio/best',
-        'outtmpl' : filename,
-        'quiet' : False,
-        'noplaylist' : not allow_playlist,
+        'format': 'bestaudio[ext=m4a]/best', 
+        
+        'outtmpl': base_filename,
+        'quiet': True,
+        'noplaylist': not allow_playlist,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'm4a',
@@ -18,15 +21,19 @@ async def download_audio(url: list[str], session_id: str, allow_playlist: bool =
 
     try:
         with yt_dlp.YoutubeDL(ydl_ops) as ydl:
-            ydl.download(url)
-        print("Download complete")
+            ydl.download([url])
+        
+        final_filename = f"{base_filename}.m4a"
+        print("Download & Processing Completed")
+        return final_filename
     except Exception as e:
-        print(f"An error occurred: {e}")
-
+        print(f"DL Error: {e}")
+        return None
 
 def load_audio_to_numpy(file_path):
+    if not file_path or not os.path.exists(file_path): return None
     try:
-        # This uses ffmpeg to read the audio into a float32 buffer at 16k sample rate
+        print("Converting Audio To Array")
         out, _ = (
             ffmpeg.input(file_path, threads=0)
             .output("-", format="s16le", acodec="pcm_s16le", ac=1, ar=16000)
