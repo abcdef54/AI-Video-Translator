@@ -1,1 +1,7 @@
-# Python dependencies for YouTube Video Translator
+fastapi
+uvicorn[standard]
+faster-whisper
+yt-dlp
+ffmpeg-python
+numpy
+torch --index-url https://download.pytorch.org/whl/cu128
