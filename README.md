@@ -4,7 +4,7 @@ A full-stack web application that translates YouTube videos in real-time using O
 
 Unlike traditional tools that wait for the entire video to process before showing results, this project utilizes a **Streaming Architecture** via WebSockets to start playing subtitles almost immediately.
 
-![Project Screenshot](<img width="1911" height="924" alt="Image" src="frontend/project.png" />)
+![Project Screenshot](frontend/project.png")
 
 ## 🚀 Key Features
 
