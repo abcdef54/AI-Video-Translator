@@ -14,8 +14,32 @@
     <div id="stars3"></div>
 
     <div class="glass-panel top-bar">
-        <input type="text" id="video-url" placeholder="Paste YouTube URL here...">
-        <button id="url-submit-button" class="ai-button">INITIALIZE VIDEO</button>
+        <div class="source-tabs">
+            <button class="tab-btn active" onclick="switchMode('url')">YouTube URL</button>
+            <button class="tab-btn" onclick="switchMode('file')">Local File</button>
+        </div>
+
+        <div id="url-section" class="input-group active">
+            <input type="text" id="video-url" placeholder="Paste YouTube URL here...">
+            <button id="url-submit-button" class="ai-button">INITIALIZE VIDEO</button>
+        </div>
+
+        <div id="file-section" class="input-group hidden">
+            <div id="drop-area" class="drop-zone">
+                <div class="drop-content">
+                    <span class="upload-icon">☁️</span>
+                    <p>Drag & drop video here or <span class="browse-text">Browse</span></p>
+                </div>
+                <input type="file" id="file-input" accept="video/*,audio/*" hidden>
+            </div>
+            
+            <div id="file-status" class="file-status hidden">
+                <span id="file-name">video.mp4</span>
+                <button id="remove-file-btn">✕</button>
+            </div>
+
+            <button id="file-submit-button" class="ai-button" disabled>UPLOAD & PLAY</button>
+        </div>
     </div>
 
     <div id="middle-container">
@@ -36,8 +60,8 @@
         <select id="model-select" class="ai-select">
             <option value="tiny">Tiny (Fastest)</option>
             <option value="small">Small</option>
-            <option value="medium" selected>Medium (Balanced)</option>
-            <option value="large-v3">Large-v3 (Best Quality)</option>
+            <option value="medium">Medium</option>
+            <option value="large-v3" selected>Large-v3</option>
         </select>
     </div>
 
@@ -70,6 +94,6 @@
     </div>
 
     <script src="https://www.youtube.com/iframe_api"></script>
-    <script src="script.js"></script>
+    <script src="newjs.js"></script>
 </body>
 </html>

@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isReady: false,
         isStreamRunning: false, 
         currentStreamStart: 0,
-        firstPlay: true
+        firstPlay: true,
     };
 
     const elements = {
@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 if (data.status.includes("Ready")) {
                     state.isReady = true;
+                    console.log(`Model Size: ${data.model_size}, Language: ${state.language}`);
                     
                     if (data.status === "Ready to play") {
                        // Backend has auto-started. We just wait for data now.
@@ -81,6 +82,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             else if (data.type == 'subtitle') {
+                if (data.language != state.language && state.firstPlay == true) {
+                    console.log(`Discarded subtitle for ${data.language}, current language is ${state.language}`);
+                    setUiLock(true);
+                    updateStatus("Buffering AI Stream (~5s)...");
+                    return;
+                }
+                if (data.language === state.language && state.firstPlay == true) {
+                    console.log(`Received first subtitle for ${data.language}, current language is ${state.language}`);
+                    setUiLock(false);
+                    updateStatus("Ready! Click Play.");
+                    state.firstPlay = false;
+                }
+
                 if (!state.isReady) return;
                 if (!state.subtitles.find(s => s.start == data.start)) {
                     state.subtitles.push(data);
