@@ -4,4 +4,4 @@ faster-whisper
 yt-dlp
 ffmpeg-python
 numpy
-torch --index-url https://download.pytorch.org/whl/cu128
+python-multipart
