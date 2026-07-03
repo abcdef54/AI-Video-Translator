@@ -1,113 +1,96 @@
-# 🎥 AI Video Translator (Real-Time)
+# AI Video Translator (Real-Time)
 
-A full-stack web application that translates YouTube videos in real-time using OpenAI's Whisper model. 
+A full-stack web application that translates YouTube videos and local video/audio files in real-time. 
 
-Unlike traditional tools that wait for the entire video to process before showing results, this project utilizes a **Streaming Architecture** via WebSockets to start playing subtitles almost immediately.
+Unlike traditional tools that wait for the entire video to process before showing results, this project utilizes a Streaming Architecture via WebSockets to start playing subtitles almost immediately.
 
-![Project Screenshot](frontend/project.png")
+## Key Features
 
-## 🚀 Key Features
+* **Real-Time Streaming:** Starts translating instantly using a linear audio processing pipeline.
+* **Smart Caching:** The frontend intelligently caches subtitles. Seeking back and forward allows for instant replay without re-fetching data from the server.
+* **Dockerized Execution:** Runs fully containerized on your machine, with GPU auto-detection (Nvidia CUDA) and fallbacks for CPU-only systems.
+* **Pre-Baked Model:** The large-v3 model is baked directly into the Docker image, enabling instant load-times without downloading multi-gigabyte models on startup.
+* **Dual-Language Transcript Export:** Compiles a side-by-side aligned CSV of both the original language and the English translation, downloadable via the interface after processing finishes.
+* **Accuracy Presets:** Choose between Maximum Accuracy (default, high beam size and fallbacks) and Interactive Sweet Spot (balanced, faster, optimized for weaker systems).
 
-* **⚡ Real-Time Streaming:** Starts translating instantly using a linear audio processing pipeline—no long wait times.
-* **🧠 Smart Caching:** The frontend intelligently caches subtitles. Seeking back and forward allows for instant replay without re-fetching data from the server.
-* **💾 Local Execution:** Runs 100% locally on your machine (Privacy-focused, no API costs).
-* **🤖 Multi-Model Support:** Switch between Whisper model sizes (`tiny`, `small`, `medium`, `large-v3`) on the fly.
-* **🎨 Dynamic UI:** 
-    * "Smart Wait" buffering system that handles model warm-up times gracefully.
-    * **Custom Fullscreen Player:** Bypasses YouTube's iframe limitations to keep subtitles visible in fullscreen mode.
-* **🌍 Multi-Language Support:** Translates from any supported language into English (or other target languages supported by the backend configuration).
-
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Backend
-* **Python 3.10+**
+* **Python 3.12+ (Docker base image PyTorch)**
 * **FastAPI:** High-performance web framework for handling API requests.
 * **WebSockets:** For full-duplex communication between client and server.
 * **Faster-Whisper:** Optimized implementation of OpenAI's Whisper model (using CTranslate2).
-* **yt-dlp:** Robust media downloader for extracting audio from YouTube.
+* **yt-dlp:** Media downloader for extracting audio from YouTube.
 * **FFmpeg:** High-speed audio conversion and processing.
 
 ### Frontend
-* **Vanilla JavaScript:** Lightweight, event-driven logic for state management and socket handling.
-* **HTML5 & CSS3:** Custom animations and responsive layout.
-* **YouTube Iframe API:** For embedding and controlling the video player.
+* **Vanilla JavaScript:** Event-driven logic for state management, socket handling, and client-side CSV downloads.
+* **HTML5 & CSS3:** Responsive sci-fi layout and custom player configurations.
+* **YouTube IFrame Player API:** For video control.
 
-## 📂 Project Structure
-```
+## Project Structure
 
+```text
 Youtube-Video-Translator/
 ├── backend/
-│   ├── main.py             # FastAPI server & WebSocket endpoint
-│   └── utils.py            # Audio download (yt-dlp) & processing (ffmpeg) logic
+│   ├── main.py             # FastAPI server & WebSocket handlers
+│   └── utils.py            # Audio download (yt-dlp) & conversion (ffmpeg)
 ├── frontend/
 │   ├── index.html          # Main application interface
-│   ├── style.css           # Sci-fi theming, animations, and responsive design
-│   └── script.js           # WebSocket client, caching logic, & player controls
-├── models/                 # Directory where Whisper models are downloaded
+│   ├── style.css           # Styling, animations, and responsive layout
+│   └── newjs.js            # WebSocket client, caching logic, & player control
+├── models/                 # Host directory volume-mounted for model caching
 ├── requirements.txt        # Python dependencies
+├── dockerfile              # Backend container recipe
+├── .dockerignore           # Excludes heavy folders from Docker context
 ├── run.bat                 # One-click startup script (Windows)
+├── run.sh                  # One-click startup script (Unix/macOS)
 └── README.md
-
 ```
 
-## 📦 Installation & Setup
+## Setup and Running
+
+The system uses Docker to manage the backend, ensuring dependencies (like PyTorch, CUDA, and FFmpeg) are pre-configured out-of-the-box.
 
 ### Prerequisites
-1.  **Python 3.10+**: Ensure Python is added to your system PATH.
-2.  **FFmpeg**: Must be installed and added to your system PATH.
-    * [Download FFmpeg](https://ffmpeg.org/download.html)
-3.  **CUDA Toolkit (Optional)**: Recommended for GPU acceleration if you have an NVIDIA card.
 
-### Step-by-Step Guide
+* **Docker Desktop:** Installed and running on your system.
+* **Nvidia Container Toolkit (Optional):** Required if you want GPU/CUDA acceleration on Windows/Linux.
 
-1.  **Clone the Repository**
-    ```bash
-    git clone [https://github.com/abcdef54/Youtube-Video-Translator.git](https://github.com/abcdef54/Youtube-Video-Translator.git)
-    cd AI-Video-Translator
-    ```
+### Startup Guide
 
-2.  **Create a Virtual Environment**
-    ```bash
-    python -m venv .venv
-    # Activate on Windows:
-    .venv\Scripts\activate
-    # Activate on Mac/Linux:
-    source .venv/bin/activate
-    ```
+Simply run the startup script for your operating system in the root directory:
 
-3.  **Install Dependencies**
-    ```bash
-    pip install -r requirements.txt
-    ```
+#### On Windows (PowerShell/CMD):
+```cmd
+.\run.bat
+```
 
-4.  **Run the Application**
-    Simply double-click the **`run.bat`** file.
-    
-    *Or run manually:*
-    ```bash
-    # Terminal 1 (Backend)
-    python backend/main.py
-    
-    # Terminal 2 (Frontend)
-    cd frontend
-    python -m http.server 5500
-    ```
+#### On Linux / macOS / Git Bash:
+```bash
+./run.sh
+```
 
-5.  **Access the App**
-    Open your browser and navigate to `http://localhost:5500` (or the URL provided by your terminal).
+### What the startup scripts do:
+1. Automatically build the Docker backend image if it does not exist.
+2. Auto-detect if an Nvidia GPU is available (runs with `--gpus all` if present, falls back to CPU safely if not).
+3. Start the backend container and mount the local `models` directory to cache any runtime model downloads.
+4. Launch the local HTTP server for the frontend on port 5500.
+5. Poll the backend until it is responsive and automatically open the application in your browser at `http://localhost:5500`.
 
-## 🎮 How to Use
+---
 
-1.  **Paste URL:** Copy a YouTube link and paste it into the input field.
-2.  **Configure:** Select your desired **Whisper Model** size (larger models = better accuracy but slower).
-3.  **Initialize:** Click the **INITIALIZE VIDEO** button.
-4.  **Watch:** The system will lock the UI briefly to buffer the AI stream, then automatically start playing with subtitles.
-5.  **Context:** You can provide a "Context" hint (e.g., "Medical Lecture", "Coding Tutorial") to improve transcription accuracy for specific jargon.
+## How to Use
 
-## ⚠️ Disclaimer
+1. **Paste URL or Upload File:** Copy a YouTube link and paste it into the input field under the "YouTube URL" tab, or drop a video file in the "Local File" tab.
+2. **Configure Settings:** Configure your Whisper model size, accuracy mode, and semantic context before initializing. These settings will lock during playback to maintain synchronization.
+3. **Initialize Playback:** Click the initialize button. The UI locks briefly while the audio downloads/buffers, then unlocks to play the video with real-time subtitles.
+4. **Extract Transcript:** Once the video has finished transcribing, the "Extract Transcript" button becomes active. Click it to download a dual-column CSV containing the original text and the translated English text, perfectly aligned.
 
-This project is for **educational and research purposes only**. It utilizes `yt-dlp` to process audio streams. Users must respect YouTube's Terms of Service and copyright regulations. The authors do not condone downloading or distributing copyrighted content without permission.
+## Disclaimer
 
-## 📄 License
+This project is for educational and research purposes only. It utilizes yt-dlp to process audio streams. Users must respect YouTube's Terms of Service and copyright regulations. The authors do not condone downloading or distributing copyrighted content without permission.
+
+## License
 
 [MIT License](LICENSE)
