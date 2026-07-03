@@ -10,9 +10,11 @@ document.addEventListener('DOMContentLoaded', () => {
         context: '',
         subtitles: [],
         isReady: false,
-        isStreamRunning: false, 
+        isStreamRunning: false,
         currentStreamStart: 0,
         model_size: 'large-v3',
+        accuracy_mode: 'maximum',
+        isCompleted: false,
         firstPlay: true,
         url: ""
     };
@@ -25,6 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
         subtitleText: document.getElementById('subtitle-text'),
         langButtons: document.querySelectorAll('.language-button'),
         modelSelect: document.getElementById('model-select'),
+        accuracySelect: document.getElementById('accuracy-select'),
+        extractBtn: document.getElementById('extract-transcript-btn'),
         sidePanel: document.querySelector('.side-panel'),
         videoWrapper: document.querySelector('.video-wrapper'),
         fsBtn: document.getElementById('fullscreen-btn'),
@@ -84,7 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (files.length > 0) {
             selectedFile = files[0];
             elements.fileNameDisplay.innerText = selectedFile.name;
-            
+
             elements.dropArea.classList.add('hidden');
             elements.dropArea.style.display = 'none';
             elements.fileStatus.classList.remove('hidden');
@@ -97,12 +101,13 @@ document.addEventListener('DOMContentLoaded', () => {
         e.stopPropagation();
         selectedFile = null;
         elements.fileInput.value = '';
-        
+
         elements.fileStatus.classList.add('hidden');
         elements.fileStatus.style.display = 'none';
         elements.dropArea.classList.remove('hidden');
         elements.dropArea.style.display = 'flex';
         elements.fileSubmitBtn.disabled = true;
+        lockConfig(false);
     });
 
 
@@ -111,8 +116,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const overlay = document.getElementById('subtitle-overlay');
         const fsBtn = document.getElementById('fullscreen-btn');
-        container.innerHTML = ''; 
-        
+        container.innerHTML = '';
+
         const video = document.createElement('video');
         video.id = 'player';
         video.src = fileUrl;
@@ -120,10 +125,10 @@ document.addEventListener('DOMContentLoaded', () => {
         video.style.width = '100%';
         video.style.height = '100%';
         video.style.backgroundColor = '#000';
-        
+
         container.appendChild(video);
         container.appendChild(overlay);
-        container.appendChild(fsBtn);   
+        container.appendChild(fsBtn);
 
         player = {
             getCurrentTime: () => video.currentTime,
@@ -131,8 +136,8 @@ document.addEventListener('DOMContentLoaded', () => {
             playVideo: () => video.play(),
 
             getPlayerState: () => {
-                if (video.paused) return 2; 
-                if (video.ended) return 0;  
+                if (video.paused) return 2;
+                if (video.ended) return 0;
                 return 1;
             }
         };
@@ -147,6 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!selectedFile) return;
 
         setUiLock(true);
+        lockConfig(true);
         updateStatus("Uploading video to AI server...");
 
         const localVideoUrl = URL.createObjectURL(selectedFile);
@@ -165,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (result.status === 'success') {
                 updateStatus("Processing audio...");
-                
+
                 state.url = "local_file";
                 state.isReady = false;
                 resetStreamState();
@@ -174,8 +180,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     action: "load_file",
                     file_path: result.file_path,
                     language: state.language,
-                    context: state.context,
-                    model_size: state.model_size,
+                    context: elements.contextInput.value,
+                    model_size: elements.modelSelect.value,
+                    accuracy_mode: elements.accuracySelect.value,
                     timestamp: 0.0
                 }));
             } else {
@@ -200,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.contextBtn.disabled = true;
             elements.contextBtn.classList.add('ui-disabled');
 
-            if (player) player.pauseVideo();
+            if (player && typeof player.pauseVideo === 'function') player.pauseVideo();
 
             elements.subtitleText.innerText = "[SYSTEM] Processing... Please wait.";
         } else {
@@ -223,7 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function connectWebSocket() {
         ws = new WebSocket(WS_URL);
-        ws.onopen = () => { 
+        ws.onopen = () => {
             updateStatus("AI Connected. Ready to load.");
             getInitialConfig()
         };
@@ -284,6 +291,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.context = data.context
                     updateStatus("Changed context successfully. Buffering AI Stream (5 seconds)...")
                 }
+
+                else if (data.status === "Accuracy Changed") {
+                    state.accuracy_mode = data.accuracy_mode
+                    elements.accuracySelect.value = state.accuracy_mode
+                    updateStatus("Changed accuracy successfully. Buffering AI Stream (5 seconds)...")
+                }
             }
 
 
@@ -292,7 +305,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log(`Default model size ${state.model_size} init model size ${data.model_size}`)
                 state.model_size = data.model_size
                 elements.modelSelect.value = state.model_size
-                // elements.modelSelect.text = state.model_size
+                if (data.accuracy_mode) {
+                    state.accuracy_mode = data.accuracy_mode
+                    elements.accuracySelect.value = state.accuracy_mode
+                }
                 setUiLock(false);
             }
 
@@ -305,7 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     end: data.end,
                     text: "" // explicit silence marker
                 });
-                
+
                 if (state.firstPlay) {
                     if (data.start >= 10) {
                         setUiLock(false);
@@ -314,7 +330,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            
+            else if (data.type === "completed") {
+                state.isCompleted = true;
+                if (elements.extractBtn) {
+                    elements.extractBtn.disabled = false;
+                    elements.extractBtn.removeAttribute('title');
+                }
+                setUiLock(false);
+                updateStatus("Transcription and translation completed!");
+            }
+
+            else if (data.type === "transcript_csv") {
+                const blob = new Blob([data.csv_data], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.setAttribute("download", `transcript_${state.language}_to_en.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                updateStatus("Transcript CSV exported!");
+            }
+
+
             // This is where we unlock the ui for any changed that happened while the
             // model is running
             else if (data.type && data.type === "subtitle") {
@@ -352,6 +389,28 @@ document.addEventListener('DOMContentLoaded', () => {
         state.isStreamRunning = false;
         state.subtitles = [];
         state.firstPlay = true;
+        state.isCompleted = false;
+        if (elements.extractBtn) {
+            elements.extractBtn.disabled = true;
+            elements.extractBtn.setAttribute('title', 'Model has yet to finish transcribe');
+        }
+    }
+
+    function lockConfig(locked) {
+        if (elements.modelSelect) elements.modelSelect.disabled = locked;
+        if (elements.accuracySelect) elements.accuracySelect.disabled = locked;
+        if (elements.contextInput) elements.contextInput.disabled = locked;
+        if (elements.contextBtn) elements.contextBtn.disabled = locked;
+
+        if (locked) {
+            if (elements.modelSelect) elements.modelSelect.classList.add('ui-disabled');
+            if (elements.accuracySelect) elements.accuracySelect.classList.add('ui-disabled');
+            if (elements.contextBtn) elements.contextBtn.classList.add('ui-disabled');
+        } else {
+            if (elements.modelSelect) elements.modelSelect.classList.remove('ui-disabled');
+            if (elements.accuracySelect) elements.accuracySelect.classList.remove('ui-disabled');
+            if (elements.contextBtn) elements.contextBtn.classList.remove('ui-disabled');
+        }
     }
 
     function debounce(fn, delay = 500) {
@@ -362,7 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             clearTimeout(timer);
             timer = setTimeout(() => {
-            fn.apply(context, args);
+                fn.apply(context, args);
             }, delay);
         };
     }
@@ -388,7 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Stream already running (silence or speech)");
             return;
         }
-        
+
 
         if (hasData(timestamp)) {
             console.log(`Cache Hit at ${timestamp}s. Playing from memory.`);
@@ -399,36 +458,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         setUiLock(true) // wait for subtitle to come
         ws.send(JSON.stringify({
-            action : "translate",
-            timestamp : timestamp
+            action: "translate",
+            timestamp: timestamp
         }))
 
         // this only trigger when skip ahead of backend
         console.log(`Cache Miss at ${timestamp}s. Requesting Stream...`);
         state.isStreamRunning = true;
     }, 400);
-
-
-
-    elements.modelSelect.addEventListener("change", () => {
-        if (elements.modelSelect.value !== state.model_size) {
-            // call backend only when the video has been loaded
-            if (state.url) {
-                setUiLock(true);
-                ws.send(JSON.stringify({
-                    action: "change_model",
-                    timestamp : player.getCurrentTime(),
-                    model_size: elements.modelSelect.value
-                }));
-
-                state.isReady = false;
-                resetStreamState();
-            }
-            else {
-                state.model_size = elements.modelSelect.value
-            }
-        }
-    });
 
 
 
@@ -458,27 +495,9 @@ document.addEventListener('DOMContentLoaded', () => {
         })
     })
 
-
-
     elements.contextBtn.addEventListener("click", () => {
-        const new_context = elements.contextInput.value
-        if (new_context == state.context) return
-        
-        if (state.url) {
-            setUiLock(true)
-
-            ws.send(JSON.stringify({
-                action : "change_context",
-                context : new_context,
-                timestamp : player.getCurrentTime()
-            }));
-
-            resetStreamState();
-        }
-        else {
-            state.context = new_context
-        }
-        
+        state.context = elements.contextInput.value;
+        updateStatus(`Semantic context updated to: "${state.context}"`);
     });
 
 
@@ -487,12 +506,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (player && typeof player.cueVideoById === 'function') return;
 
         console.log("Restoring YouTube Player...");
-        
+
         const container = document.querySelector('.video-wrapper');
         const overlay = document.getElementById('subtitle-overlay');
         const fsBtn = document.getElementById('fullscreen-btn');
 
-        container.innerHTML = '<div id="player"></div>'; 
+        container.innerHTML = '<div id="player"></div>';
         container.appendChild(overlay);
         container.appendChild(fsBtn);
 
@@ -523,15 +542,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             setUiLock(true);
+            lockConfig(true);
             ws.send(JSON.stringify({
-                action : "load_video",
-                url : url,
-                language : state.language,
-                context : state.context,
-                model_size : state.model_size,
-                timestamp : 0.0
+                action: "load_video",
+                url: url,
+                language: state.language,
+                context: elements.contextInput.value,
+                model_size: elements.modelSelect.value,
+                accuracy_mode: elements.accuracySelect.value,
+                timestamp: 0.0
             }));
-            
+
             resetStreamState();
             state.isReady = false;
             state.currentStreamStart = 0;
@@ -554,13 +575,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
-    window.onYouTubeIframeAPIReady = function() {
+    window.onYouTubeIframeAPIReady = function () {
         player = new YT.Player('player', {
             height: '100%', width: '100%',
-            playerVars: { 
-                'playsinline': 1, 
-                'fs': 0,       
-                'controls': 1 
+            playerVars: {
+                'playsinline': 1,
+                'fs': 0,
+                'controls': 1
             },
             events: { 'onStateChange': onPlayerStateChange }
         });
@@ -589,7 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!player || !player.getCurrentTime) return;
         const t = player.getCurrentTime();
         const activeSub = state.subtitles.find(s => t >= s.start && t <= s.end);
-        
+
         if (activeSub) {
             if (activeSub.text !== elements.subtitleText.innerText) {
                 elements.subtitleText.innerText = activeSub.text;
@@ -602,15 +623,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 100);
 
     const list = document.getElementById('language-list');
-    document.getElementById('scroll-up').addEventListener('click', () => list.scrollBy({top:-100, behavior:'smooth'}));
-    document.getElementById('scroll-down').addEventListener('click', () => list.scrollBy({top:100, behavior:'smooth'}));
+    document.getElementById('scroll-up').addEventListener('click', () => list.scrollBy({ top: -100, behavior: 'smooth' }));
+    document.getElementById('scroll-down').addEventListener('click', () => list.scrollBy({ top: 100, behavior: 'smooth' }));
+
+
+    if (elements.extractBtn) {
+        elements.extractBtn.addEventListener('click', () => {
+            if (!state.isCompleted || !ws || ws.readyState !== WebSocket.OPEN) return;
+            updateStatus("Exporting transcript...");
+            ws.send(JSON.stringify({
+                action: "extract_transcript"
+            }));
+        });
+    }
+
+    if (elements.urlInput) {
+        elements.urlInput.addEventListener('input', () => {
+            lockConfig(false);
+        });
+    }
 
 
     function getInitialConfig() {
         setUiLock(true)
 
         ws.send(JSON.stringify({
-            action : "init_config"
+            action: "init_config"
         }))
     }
     connectWebSocket();

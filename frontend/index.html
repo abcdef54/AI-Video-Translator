@@ -65,6 +65,14 @@
         </select>
     </div>
 
+    <div class="model-selector-container" style="margin-top: 10px;">
+        <label for="accuracy-select" style="font-size: 10px; color:#aaa; margin-bottom: 5px; display:block;">TRANSCRIBE ACCURACY</label>
+        <select id="accuracy-select" class="ai-select">
+            <option value="maximum" selected>Maximum Accuracy (Slower)</option>
+            <option value="balanced">Interactive Sweet Spot (Faster)</option>
+        </select>
+    </div>
+
     <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 5px 0;">
 
     <h3>Target Language</h3>
@@ -84,6 +92,9 @@
         </div>
 
         <div id="scroll-down" class="scroll-arrow">▼</div> </div>
+        
+        <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 5px 0;">
+        <button id="extract-transcript-btn" class="ai-button secondary" style="width: 100%; margin-top: 5px; font-size: 10px;" disabled title="Model has yet finished to transcribe">EXTRACT TRANSCRIPT</button>
     </div>
 
     </div>
